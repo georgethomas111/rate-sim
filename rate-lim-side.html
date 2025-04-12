@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Traffic Patterns & Epidemic Forecast with Drag-to-Zoom (Static)</title>
+  <title>Traffic Patterns & Epidemic Forecast (Avg vs. Med, Static)</title>
   <!-- Include Chart.js from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Include Chart.js Zoom Plugin from CDN -->
@@ -27,8 +27,8 @@
   </style>
 </head>
 <body>
-  <h1>Traffic Patterns & Epidemic Forecast with Drag-to-Zoom (Static)</h1>
-  <p style="text-align:center;">Click and drag over an area of the graph to zoom in. Double-click to reset zoom.</p>
+  <h1>Traffic Patterns & Epidemic Forecast Comparison (Average vs. Median)</h1>
+  <p style="text-align:center;">Drag to zoom and double‑click to reset zoom.</p>
   <div class="grid-container">
     <div>
       <h2>Steady Traffic</h2>
@@ -50,9 +50,9 @@
 
   <script>
     // Configuration constants
-    const RATE_LIMIT = 50;         // Maximum allowed requests per minute
-    const TOTAL_MINUTES = 60;      // Total timeline length (60 minutes)
-    const EPIDEMIC_WINDOW = 5;     // Use the last 5 data points for computing growth ratios
+    const RATE_LIMIT = 50;         // Rate limit in requests per minute
+    const TOTAL_MINUTES = 60;      // Total timeline (minutes)
+    const EPIDEMIC_WINDOW = 5;     // Window size for computing growth ratios
 
     // Utility: Compute the median of an array.
     function median(arr) {
@@ -64,9 +64,9 @@
     // Generate a single traffic data point for a given minute and pattern.
     function generateTrafficForMinute(minute, pattern) {
       let value = 0;
-      switch(pattern) {
+      switch (pattern) {
         case "steady":
-          value = 15 + Math.floor(Math.random() * 5) - 2;  // Around 15 ±2
+          value = 15 + Math.floor(Math.random() * 5) - 2;  // ~15 ±2
           break;
         case "burst":
           value = 10 + Math.floor(Math.random() * 5);
@@ -75,11 +75,12 @@
           }
           break;
         case "cyclic":
+          // Oscillates roughly between 5 and 25.
           value = 15 + Math.round(10 * Math.sin((minute / TOTAL_MINUTES) * 2 * Math.PI)) + Math.floor(Math.random() * 3);
           break;
         case "random":
           value = 10 + Math.floor(Math.random() * 5);
-          if (Math.random() < 0.1) { // 10% chance for a spike
+          if (Math.random() < 0.1) {  // 10% chance for a spike
             value += 30 + Math.floor(Math.random() * 20);
           }
           break;
@@ -89,7 +90,7 @@
       return value;
     }
 
-    // Generate a historical data series for a given pattern.
+    // Generate the full historical data series (length = TOTAL_MINUTES) for a given pattern.
     function generateHistory(pattern) {
       const history = [];
       for (let minute = 1; minute <= TOTAL_MINUTES; minute++) {
@@ -98,10 +99,26 @@
       return history;
     }
 
-    // For each minute from EPIDEMIC_WINDOW to TOTAL_MINUTES,
-    // compute the forecast for that minute using the median growth ratio from the previous EPIDEMIC_WINDOW points.
-    // Returns an array of length TOTAL_MINUTES with the first EPIDEMIC_WINDOW entries as null.
-    function computeForecastForEachMinute(history, windowSize = EPIDEMIC_WINDOW) {
+    // Compute per-minute forecast using average growth ratio.
+    // For each minute i (starting at EPIDEMIC_WINDOW), use data from minutes i-EPIDEMIC_WINDOW...i-1.
+    function computeForecastForEachMinuteAvg(history, windowSize = EPIDEMIC_WINDOW) {
+      const forecast = new Array(history.length).fill(null);
+      for (let i = windowSize; i < history.length; i++) {
+        const windowData = history.slice(i - windowSize, i);
+        const ratios = [];
+        for (let j = 1; j < windowData.length; j++) {
+          if (windowData[j - 1] > 0) {
+            ratios.push(windowData[j] / windowData[j - 1]);
+          }
+        }
+        const avgRatio = ratios.length ? (ratios.reduce((a, b) => a + b, 0) / ratios.length) : 1;
+        forecast[i] = Math.round(windowData[windowData.length - 1] * avgRatio);
+      }
+      return forecast;
+    }
+
+    // Compute per-minute forecast using median growth ratio.
+    function computeForecastForEachMinuteMed(history, windowSize = EPIDEMIC_WINDOW) {
       const forecast = new Array(history.length).fill(null);
       for (let i = windowSize; i < history.length; i++) {
         const windowData = history.slice(i - windowSize, i);
@@ -120,18 +137,19 @@
     // Prepare chart data for a given traffic pattern.
     function prepareChartData(pattern) {
       const history = generateHistory(pattern);
-      const forecast = computeForecastForEachMinute(history);
+      const forecastAvg = computeForecastForEachMinuteAvg(history);
+      const forecastMed = computeForecastForEachMinuteMed(history);
       const labels = [];
       for (let i = 1; i <= TOTAL_MINUTES; i++) {
         labels.push(i + "m");
       }
       const thresholdData = new Array(TOTAL_MINUTES).fill(RATE_LIMIT);
-      return { labels, historyData: history, forecastData: forecast, thresholdData };
+      return { labels, historyData: history, forecastAvgData: forecastAvg, forecastMedData: forecastMed, thresholdData };
     }
 
     // Create a Chart.js chart for a given canvas and traffic pattern.
     function createChart(canvasId, pattern, titleText) {
-      const { labels, historyData, forecastData, thresholdData } = prepareChartData(pattern);
+      const { labels, historyData, forecastAvgData, forecastMedData, thresholdData } = prepareChartData(pattern);
       const ctx = document.getElementById(canvasId).getContext('2d');
       const chartInstance = new Chart(ctx, {
         type: 'line',
@@ -155,8 +173,17 @@
               borderDash: [8, 4]
             },
             {
+              label: 'Per‑Minute Epidemic Forecast (Avg)',
+              data: forecastAvgData,
+              borderColor: 'teal',
+              backgroundColor: 'rgba(0, 128, 128, 0.1)',
+              fill: false,
+              tension: 0.1,
+              borderDash: [5, 5]
+            },
+            {
               label: 'Per‑Minute Epidemic Forecast (Med)',
-              data: forecastData,
+              data: forecastMedData,
               borderColor: 'darkgreen',
               backgroundColor: 'rgba(0, 100, 0, 0.1)',
               fill: false,
@@ -177,7 +204,7 @@
               position: 'bottom'
             },
             zoom: {
-              // Enable drag-to-zoom functionality:
+              // Enable drag-to-zoom by selecting an area.
               zoom: {
                 drag: {
                   enabled: true,
@@ -186,12 +213,9 @@
                   backgroundColor: 'rgba(225,225,225,0.3)',
                 },
                 mode: 'x',
-                wheel: {
-                  enabled: false
-                },
-                pinch: {
-                  enabled: true
-                }
+                // Disable wheel zoom if you wish to use drag zoom only.
+                wheel: { enabled: false },
+                pinch: { enabled: true }
               },
               pan: {
                 enabled: true,
@@ -216,7 +240,7 @@
           }
         }
       });
-      // Add double-click event listener to reset zoom.
+      // Add double-click event listener to reset zoom on double-click.
       chartInstance.canvas.addEventListener('dblclick', function() {
         chartInstance.resetZoom();
       });
@@ -231,3 +255,4 @@
   </script>
 </body>
 </html>
+

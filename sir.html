@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SIR Model with Immigration</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <canvas id="sirChart" width="800" height="400"></canvas>
+
+  <script>
+    const beta = 0.3;     // infection rate
+    const gamma = 0.1;    // recovery rate
+    const Lambda = 0.1;   // susceptible immigration
+    const lambdaI = 0.05; // infected immigration
+
+    let S = 990, I = 10, R = 0;
+    const dt = 0.1;
+    const steps = 1000;
+    const labels = [];
+    const S_data = [], I_data = [], R_data = [];
+
+    for (let i = 0; i < steps; i++) {
+      const N = S + I + R;
+      const dS = -beta * S * I / N + Lambda;
+      const dI = beta * S * I / N - gamma * I + lambdaI;
+      const dR = gamma * I;
+
+      S += dS * dt;
+      I += dI * dt;
+      R += dR * dt;
+
+      labels.push((i * dt).toFixed(1));
+      S_data.push(S);
+      I_data.push(I);
+      R_data.push(R);
+    }
+
+    const ctx = document.getElementById('sirChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Susceptible', data: S_data, borderColor: 'blue', fill: false },
+          { label: 'Infected', data: I_data, borderColor: 'red', fill: false },
+          { label: 'Recovered', data: R_data, borderColor: 'green', fill: false },
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: { display: true, text: 'SIR Model with Immigration' }
+        },
+        scales: {
+          x: { title: { display: true, text: 'Time' } },
+          y: { title: { display: true, text: 'Population' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
+

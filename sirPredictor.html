@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive SIR Epidemic Simulator</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .control {
+      flex: 1;
+      min-width: 200px;
+    }
+  </style>
+</head>
+<body>
+  <h1>SIR Model Predictor</h1>
+  <div class="controls">
+    <div class="control">
+      <label>Initial Susceptible (S): <input id="sVal" type="number" value="990"></label>
+    </div>
+    <div class="control">
+      <label>Initial Infected (I): <input id="iVal" type="number" value="10"></label>
+    </div>
+    <div class="control">
+      <label>Initial Recovered (R): <input id="rVal" type="number" value="0"></label>
+    </div>
+    <div class="control">
+      <label>Infection Rate (β): <input id="beta" type="number" step="0.01" value="0.3"></label>
+    </div>
+    <div class="control">
+      <label>Recovery Rate (γ): <input id="gamma" type="number" step="0.01" value="0.1"></label>
+    </div>
+    <div class="control">
+      <button onclick="simulate()">Run Simulation</button>
+    </div>
+  </div>
+
+  <canvas id="sirChart" width="900" height="400"></canvas>
+
+  <script>
+    let chart;
+
+    function simulate() {
+      const S0 = parseFloat(document.getElementById('sVal').value);
+      const I0 = parseFloat(document.getElementById('iVal').value);
+      const R0 = parseFloat(document.getElementById('rVal').value);
+      const beta = parseFloat(document.getElementById('beta').value);
+      const gamma = parseFloat(document.getElementById('gamma').value);
+
+      const dt = 0.1;
+      const steps = 1000;
+      let S = S0, I = I0, R = R0;
+      const labels = [], S_data = [], I_data = [], R_data = [];
+
+      for (let t = 0; t < steps; t++) {
+        const N = S + I + R;
+        const dS = -beta * S * I / N;
+        const dI = beta * S * I / N - gamma * I;
+        const dR = gamma * I;
+
+        S += dS * dt;
+        I += dI * dt;
+        R += dR * dt;
+
+        labels.push((t * dt).toFixed(1));
+        S_data.push(S);
+        I_data.push(I);
+        R_data.push(R);
+      }
+
+      if (chart) chart.destroy();
+
+      const ctx = document.getElementById('sirChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Susceptible', data: S_data, borderColor: 'blue', fill: false },
+            { label: 'Infected', data: I_data, borderColor: 'red', fill: false },
+            { label: 'Recovered', data: R_data, borderColor: 'green', fill: false }
+          ]
+        },
+        options: {
+          plugins: {
+            title: {
+              display: true,
+              text: 'SIR Model Over Time'
+            }
+          },
+          scales: {
+            x: { title: { display: true, text: 'Time (days)' } },
+            y: { title: { display: true, text: 'People' } }
+          }
+        }
+      });
+    }
+
+    simulate(); // initial render
+  </script>
+</body>
+</html>
+

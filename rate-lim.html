@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Epidemic Forecast Simulation (Median Only)</title>
+  <!-- Include Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    canvas {
+      max-width: 800px;
+    }
+    #controls {
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Epidemic Forecast Simulation (Median Only)</h1>
+  <div id="controls">
+    <label for="trafficType">Select Traffic Pattern: </label>
+    <select id="trafficType">
+      <option value="steady">Steady Traffic</option>
+      <option value="burst">Burst Traffic</option>
+      <option value="cyclic">Cyclic Traffic (Sinusoidal)</option>
+      <option value="random">Random Spikes</option>
+    </select>
+    <button id="startBtn">Start Simulation</button>
+    <button id="stopBtn" disabled>Stop Simulation</button>
+  </div>
+  <canvas id="trafficChart" width="800" height="400"></canvas>
+
+  <script>
+    // Configuration constants
+    const RATE_LIMIT = 50;           // Maximum allowed requests per minute
+    const FORECAST_STEPS = 5;        // Forecast for next 5 minutes
+    const EPIDEMIC_WINDOW = 5;       // Use the last 5 data points for computing growth ratios
+    const SIMULATION_INTERVAL = 500; // 500ms per simulated minute
+
+    let simulationTimer = null;
+
+    // Global simulation state
+    let simulationMinute = 0;
+    let historicalData = [];  // Array holding historical traffic values
+    let chartLabels = [];     // Array holding x-axis labels ("1m", "2m", etc.)
+    let trafficType = "steady";
+
+    // Create the Chart.js chart.
+    // We start with two fixed datasets:
+    // 1. Historical Traffic (blue line)
+    // 2. Rate Limit Threshold (red dashed line)
+    // The epidemic forecast (median-based) will be added as its own persistent dataset.
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    const trafficChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: chartLabels,
+        datasets: [
+          {
+            label: 'Historical Traffic',
+            data: [],
+            borderColor: 'blue',
+            backgroundColor: 'rgba(0, 0, 255, 0.1)',
+            fill: false,
+            tension: 0.1
+          },
+          {
+            label: 'Rate Limit Threshold',
+            data: [],
+            borderColor: 'red',
+            backgroundColor: 'rgba(255, 0, 0, 0.1)',
+            fill: false,
+            borderDash: [8, 4]
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'Requests per Minute' }
+          },
+          x: {
+            title: { display: true, text: 'Simulated Time (minutes)' }
+          }
+        },
+        plugins: {
+          title: { display: true, text: 'Historical Traffic & Epidemic Forecasts (Median)' }
+        }
+      }
+    });
+
+    // Utility function to compute the median of an array.
+    function median(arr) {
+      const sorted = arr.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    // Generate a simulated traffic value based on the selected pattern.
+    function generateTrafficForMinute(minute, pattern) {
+      let value = 0;
+      switch (pattern) {
+        case "steady":
+          // Around 15 ±2
+          value = 15 + Math.floor(Math.random() * 5) - 2;
+          break;
+        case "burst":
+          value = 10 + Math.floor(Math.random() * 5);
+          if (minute >= 40 && minute < 45) {
+            value += 25 + Math.floor(Math.random() * 10);
+          }
+          break;
+        case "cyclic":
+          // Use sine to oscillate between roughly 5 and 25.
+          value = 15 + Math.round(10 * Math.sin((minute / 60) * 2 * Math.PI)) + Math.floor(Math.random() * 3);
+          break;
+        case "random":
+          value = 10 + Math.floor(Math.random() * 5);
+          if (Math.random() < 0.1) { // 10% chance for a spike
+            value += 30 + Math.floor(Math.random() * 20);
+          }
+          break;
+        default:
+          value = 15;
+      }
+      return value;
+    }
+
+    // Compute the epidemic forecast using the median growth ratio.
+    function calculateEpidemicForecastMed(data, windowSize = EPIDEMIC_WINDOW, steps = FORECAST_STEPS) {
+      if (data.length < windowSize) return null;
+      let ratios = [];
+      for (let i = data.length - windowSize + 1; i < data.length; i++) {
+        const prev = data[i - 1];
+        const curr = data[i];
+        if (prev > 0) {
+          ratios.push(curr / prev);
+        }
+      }
+      const medRatio = ratios.length ? median(ratios) : 1;
+      let forecast = [];
+      let lastValue = data[data.length - 1];
+      for (let i = 1; i <= steps; i++) {
+        lastValue = lastValue * medRatio;
+        forecast.push(Math.round(lastValue));
+      }
+      return forecast;
+    }
+
+    // Add a forecast segment (using median forecast) as a new persistent dataset.
+    function addForecastDataset(forecast, forecastStartTime) {
+      // Extend chartLabels if needed, so that the forecast period is covered.
+      let forecastEndTime = forecastStartTime + FORECAST_STEPS;
+      while (chartLabels.length < forecastEndTime) {
+        chartLabels.push(chartLabels.length + "m");
+      }
+      // Create an array for the forecast dataset, filled with null.
+      let forecastData = new Array(chartLabels.length).fill(null);
+      for (let i = 1; i <= FORECAST_STEPS; i++) {
+        // forecast starts at forecastStartTime and covers the next steps.
+        let idx = forecastStartTime + i - 1;
+        forecastData[idx] = forecast[i - 1];
+      }
+      const newDataset = {
+        label: `Epidemic Forecast (Med) at ${forecastStartTime}m`,
+        data: forecastData,
+        borderColor: 'darkgreen',
+        backgroundColor: 'rgba(0, 100, 0, 0.1)',
+        fill: false,
+        tension: 0.1,
+        borderDash: [5, 5]
+      };
+      trafficChart.data.datasets.push(newDataset);
+    }
+
+    // Update the threshold dataset so that its data covers all labels.
+    function updateThresholdDataset() {
+      const thresholdData = chartLabels.map(() => RATE_LIMIT);
+      // The threshold dataset is the second fixed dataset.
+      trafficChart.data.datasets[1].data = thresholdData;
+    }
+
+    // Update forecasts every 4 simulated minutes.
+    function updateForecasts() {
+      if (historicalData.length < EPIDEMIC_WINDOW) return;
+      const medForecast = calculateEpidemicForecastMed(historicalData);
+      if (medForecast !== null) {
+        addForecastDataset(medForecast, simulationMinute);
+        console.log(`[${simulationMinute}m] Epidemic Forecast (Med) first value: ${medForecast[0]}`);
+        if (medForecast[0] > RATE_LIMIT) {
+          console.warn(`[${simulationMinute}m] Warning: Med forecast (${medForecast[0]}) exceeds the rate limit (${RATE_LIMIT}).`);
+        }
+      }
+      // Update chart labels and threshold dataset.
+      trafficChart.data.labels = chartLabels;
+      updateThresholdDataset();
+      trafficChart.update();
+    }
+
+    // One simulation step: increment the simulated minute, generate a new data point, and update the chart.
+    function simulationStep() {
+      simulationMinute++;
+      const newValue = generateTrafficForMinute(simulationMinute, trafficType);
+      historicalData.push(newValue);
+      chartLabels.push(simulationMinute + "m");
+
+      // Update historical traffic dataset.
+      trafficChart.data.datasets[0].data = historicalData.slice();
+      updateThresholdDataset();
+      trafficChart.data.labels = chartLabels;
+      trafficChart.update();
+
+      // Every 4 simulated minutes, compute a new epidemic forecast.
+      if (simulationMinute % 4 === 0) {
+        updateForecasts();
+      }
+    }
+
+    // Start the simulation: reset state and start the timer.
+    function startSimulation() {
+      simulationMinute = 0;
+      historicalData = [];
+      chartLabels = [];
+      trafficType = document.getElementById('trafficType').value;
+      
+      // Reset the chart: clear labels and keep only the fixed datasets (historical and threshold).
+      trafficChart.data.labels = [];
+      trafficChart.data.datasets = trafficChart.data.datasets.slice(0, 2);
+      trafficChart.data.datasets[0].data = [];
+      updateThresholdDataset();
+      trafficChart.update();
+
+      simulationTimer = setInterval(simulationStep, SIMULATION_INTERVAL);
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+    }
+
+    // Stop the simulation.
+    function stopSimulation() {
+      clearInterval(simulationTimer);
+      simulationTimer = null;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('startBtn').addEventListener('click', startSimulation);
+      document.getElementById('stopBtn').addEventListener('click', stopSimulation);
+    });
+  </script>
+</body>
+</html>
+

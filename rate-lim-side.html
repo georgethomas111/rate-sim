@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Traffic Patterns & Epidemic Forecast with Drag-to-Zoom (Static)</title>
+  <!-- Include Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Include Chart.js Zoom Plugin from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .grid-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-gap: 30px;
+    }
+    canvas {
+      width: 100%;
+      height: 300px;
+    }
+    h2 {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Traffic Patterns & Epidemic Forecast with Drag-to-Zoom (Static)</h1>
+  <p style="text-align:center;">Click and drag over an area of the graph to zoom in. Double-click to reset zoom.</p>
+  <div class="grid-container">
+    <div>
+      <h2>Steady Traffic</h2>
+      <canvas id="chartSteady"></canvas>
+    </div>
+    <div>
+      <h2>Burst Traffic</h2>
+      <canvas id="chartBurst"></canvas>
+    </div>
+    <div>
+      <h2>Cyclic Traffic (Sinusoidal)</h2>
+      <canvas id="chartCyclic"></canvas>
+    </div>
+    <div>
+      <h2>Random Spikes</h2>
+      <canvas id="chartRandom"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // Configuration constants
+    const RATE_LIMIT = 50;         // Maximum allowed requests per minute
+    const TOTAL_MINUTES = 60;      // Total timeline length (60 minutes)
+    const EPIDEMIC_WINDOW = 5;     // Use the last 5 data points for computing growth ratios
+
+    // Utility: Compute the median of an array.
+    function median(arr) {
+      const sorted = arr.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    // Generate a single traffic data point for a given minute and pattern.
+    function generateTrafficForMinute(minute, pattern) {
+      let value = 0;
+      switch(pattern) {
+        case "steady":
+          value = 15 + Math.floor(Math.random() * 5) - 2;  // Around 15 ±2
+          break;
+        case "burst":
+          value = 10 + Math.floor(Math.random() * 5);
+          if (minute >= 40 && minute < 45) {
+            value += 25 + Math.floor(Math.random() * 10);
+          }
+          break;
+        case "cyclic":
+          value = 15 + Math.round(10 * Math.sin((minute / TOTAL_MINUTES) * 2 * Math.PI)) + Math.floor(Math.random() * 3);
+          break;
+        case "random":
+          value = 10 + Math.floor(Math.random() * 5);
+          if (Math.random() < 0.1) { // 10% chance for a spike
+            value += 30 + Math.floor(Math.random() * 20);
+          }
+          break;
+        default:
+          value = 15;
+      }
+      return value;
+    }
+
+    // Generate a historical data series for a given pattern.
+    function generateHistory(pattern) {
+      const history = [];
+      for (let minute = 1; minute <= TOTAL_MINUTES; minute++) {
+        history.push(generateTrafficForMinute(minute, pattern));
+      }
+      return history;
+    }
+
+    // For each minute from EPIDEMIC_WINDOW to TOTAL_MINUTES,
+    // compute the forecast for that minute using the median growth ratio from the previous EPIDEMIC_WINDOW points.
+    // Returns an array of length TOTAL_MINUTES with the first EPIDEMIC_WINDOW entries as null.
+    function computeForecastForEachMinute(history, windowSize = EPIDEMIC_WINDOW) {
+      const forecast = new Array(history.length).fill(null);
+      for (let i = windowSize; i < history.length; i++) {
+        const windowData = history.slice(i - windowSize, i);
+        const ratios = [];
+        for (let j = 1; j < windowData.length; j++) {
+          if (windowData[j - 1] > 0) {
+            ratios.push(windowData[j] / windowData[j - 1]);
+          }
+        }
+        const medRatio = ratios.length ? median(ratios) : 1;
+        forecast[i] = Math.round(windowData[windowData.length - 1] * medRatio);
+      }
+      return forecast;
+    }
+
+    // Prepare chart data for a given traffic pattern.
+    function prepareChartData(pattern) {
+      const history = generateHistory(pattern);
+      const forecast = computeForecastForEachMinute(history);
+      const labels = [];
+      for (let i = 1; i <= TOTAL_MINUTES; i++) {
+        labels.push(i + "m");
+      }
+      const thresholdData = new Array(TOTAL_MINUTES).fill(RATE_LIMIT);
+      return { labels, historyData: history, forecastData: forecast, thresholdData };
+    }
+
+    // Create a Chart.js chart for a given canvas and traffic pattern.
+    function createChart(canvasId, pattern, titleText) {
+      const { labels, historyData, forecastData, thresholdData } = prepareChartData(pattern);
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      const chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Historical Traffic',
+              data: historyData,
+              borderColor: 'blue',
+              backgroundColor: 'rgba(0, 0, 255, 0.1)',
+              fill: false,
+              tension: 0.1
+            },
+            {
+              label: 'Rate Limit Threshold',
+              data: thresholdData,
+              borderColor: 'red',
+              backgroundColor: 'rgba(255, 0, 0, 0.1)',
+              fill: false,
+              borderDash: [8, 4]
+            },
+            {
+              label: 'Per‑Minute Epidemic Forecast (Med)',
+              data: forecastData,
+              borderColor: 'darkgreen',
+              backgroundColor: 'rgba(0, 100, 0, 0.1)',
+              fill: false,
+              tension: 0.1,
+              borderDash: [5, 5]
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: titleText,
+              font: { size: 16 }
+            },
+            legend: {
+              position: 'bottom'
+            },
+            zoom: {
+              // Enable drag-to-zoom functionality:
+              zoom: {
+                drag: {
+                  enabled: true,
+                  borderColor: 'rgba(225,225,225,0.3)',
+                  borderWidth: 2,
+                  backgroundColor: 'rgba(225,225,225,0.3)',
+                },
+                mode: 'x',
+                wheel: {
+                  enabled: false
+                },
+                pinch: {
+                  enabled: true
+                }
+              },
+              pan: {
+                enabled: true,
+                mode: 'x'
+              }
+            }
+          },
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: 'Time (minutes)'
+              }
+            },
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Requests per Minute'
+              }
+            }
+          }
+        }
+      });
+      // Add double-click event listener to reset zoom.
+      chartInstance.canvas.addEventListener('dblclick', function() {
+        chartInstance.resetZoom();
+      });
+      return chartInstance;
+    }
+
+    // Create the four charts.
+    createChart('chartSteady', 'steady', 'Steady Traffic');
+    createChart('chartBurst', 'burst', 'Burst Traffic');
+    createChart('chartCyclic', 'cyclic', 'Cyclic Traffic (Sinusoidal)');
+    createChart('chartRandom', 'random', 'Random Spikes');
+  </script>
+</body>
+</html>

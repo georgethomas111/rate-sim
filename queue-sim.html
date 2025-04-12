@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Queueing Simulation (M/M/c)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    canvas { max-width: 100%; height: 300px; }
+    body { font-family: sans-serif; padding: 20px; }
+    input, textarea { width: 100%; margin-bottom: 10px; padding: 5px; }
+    label { font-weight: bold; display: block; margin-top: 10px; }
+    .chart-container { display: flex; flex-wrap: wrap; gap: 20px; }
+    .chart-box { flex: 1 1 48%; }
+  </style>
+</head>
+<body>
+  <h2>Queue Simulation (Multiple Servers)</h2>
+
+  <label for="inputData">Input Data (time,usercount per line):</label>
+  <textarea id="inputData" rows="6" placeholder="e.g.\n0,3\n10,5\n20,6"></textarea>
+
+  <label for="maxQueue">Max Queue Limit:</label>
+  <input id="maxQueue" type="number" value="100">
+
+  <label for="serviceTime">Average Service Time per User (seconds):</label>
+  <input id="serviceTime" type="number" value="90">
+
+  <label for="servers">Number of Concurrent Service Slots:</label>
+  <input id="servers" type="number" value="100">
+
+  <button onclick="runPrediction()">Run Prediction</button>
+
+  <div class="chart-container">
+    <div class="chart-box">
+      <canvas id="queueChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <canvas id="arrivalChart"></canvas>
+    </div>
+  </div>
+
+  <p>Estimated Arrival Rate (λ): <span id="lambda">-</span> /min</p>
+  <p>Estimated Service Rate per Slot (μ): <span id="mu">-</span> /min</p>
+  <p>Total Service Capacity (cμ): <span id="cmu">-</span> /min</p>
+  <p>Predicted Behavior: <span id="prediction">-</span></p>
+
+  <script>
+    const queueChartCtx = document.getElementById('queueChart').getContext('2d');
+    const arrivalChartCtx = document.getElementById('arrivalChart').getContext('2d');
+    let queueHistory = [];
+
+    const queueChart = new Chart(queueChartCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Queue Length',
+          data: [],
+          borderColor: 'blue',
+          fill: false
+        }]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        scales: {
+          x: { title: { display: true, text: 'Time (s)' } },
+          y: { title: { display: true, text: 'Queue Length' }, beginAtZero: true }
+        }
+      }
+    });
+
+    const arrivalChart = new Chart(arrivalChartCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Arriving Users',
+            data: [],
+            borderColor: 'green',
+            fill: false
+          },
+          {
+            label: 'Max Limit (Capacity)',
+            data: [],
+            borderColor: 'red',
+            borderDash: [5, 5],
+            fill: false
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        scales: {
+          x: { title: { display: true, text: 'Time (s)' } },
+          y: { title: { display: true, text: 'User Count' }, beginAtZero: true }
+        }
+      }
+    });
+
+    function updateCharts() {
+      const times = queueHistory.map(d => d.time);
+      const lengths = queueHistory.map(d => d.length);
+
+      queueChart.data.labels = times;
+      queueChart.data.datasets[0].data = lengths;
+      queueChart.update();
+
+      const maxQueue = parseInt(document.getElementById('maxQueue').value);
+      arrivalChart.data.labels = times;
+      arrivalChart.data.datasets[0].data = lengths;
+      arrivalChart.data.datasets[1].data = times.map(() => maxQueue);
+      arrivalChart.update();
+    }
+
+    function estimateRates(history) {
+      let arrivals = 0, departures = 0;
+      for (let i = 1; i < history.length; i++) {
+        const delta = history[i].length - history[i-1].length;
+        if (delta > 0) arrivals += delta;
+        else if (delta < 0) departures += Math.abs(delta);
+      }
+      const durationMin = (history.at(-1)?.time - history[0].time) / 60;
+      const lambda = durationMin ? (arrivals / durationMin).toFixed(2) : 0;
+      const mu = durationMin ? (departures / durationMin).toFixed(2) : 0;
+      document.getElementById('lambda').textContent = lambda;
+      document.getElementById('mu').textContent = mu;
+      return { lambda: parseFloat(lambda), mu: parseFloat(mu) };
+    }
+
+    function predictBehavior(lambda, mu, servers) {
+      const cmu = mu * servers;
+      document.getElementById('cmu').textContent = cmu.toFixed(2);
+      if (lambda >= cmu) return "Unstable (queue will grow)";
+      const utilization = lambda / cmu;
+      const avgQueueLength = utilization * utilization / (1 - utilization);
+      return `Stable (avg queue length ≈ ${avgQueueLength.toFixed(1)})`;
+    }
+
+    function runPrediction() {
+      const inputText = document.getElementById('inputData').value.trim();
+      const lines = inputText.split("\n");
+      queueHistory = [];
+
+      for (const line of lines) {
+        const [timeStr, countStr] = line.split(',');
+        const time = parseFloat(timeStr);
+        const count = parseInt(countStr);
+        if (!isNaN(time) && !isNaN(count)) {
+          queueHistory.push({ time, length: count });
+        }
+      }
+
+      queueHistory.sort((a, b) => a.time - b.time);
+      updateCharts();
+      const { lambda } = estimateRates(queueHistory);
+
+      const serviceTime = parseFloat(document.getElementById('serviceTime').value);
+      const maxQueue = parseInt(document.getElementById('maxQueue').value);
+      const servers = parseInt(document.getElementById('servers').value);
+
+      const muPerServer = serviceTime > 0 ? (60 / serviceTime) : 0;
+      const behavior = predictBehavior(lambda, muPerServer, servers);
+
+      document.getElementById('mu').textContent = muPerServer.toFixed(2);
+      document.getElementById('prediction').textContent = behavior;
+    }
+  </script>
+</body>
+</html>
+
